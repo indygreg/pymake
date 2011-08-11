@@ -64,7 +64,7 @@ def _if_else(c, t, f):
 class StringExpansion(object):
     __slots__ = ('loc', 's',)
     simple = True
-    
+
     def __init__(self, s, loc):
         assert isinstance(s, str)
         self.s = s
@@ -202,7 +202,7 @@ class Expansion(list):
             else:
                 assert isinstance(e, str)
                 fd.write(e)
-                    
+
     def resolvestr(self, makefile, variables, setting=[]):
         fd = StringIO()
         self.resolve(makefile, variables, fd, setting)
@@ -216,7 +216,7 @@ class Expansion(list):
 
 class Variables(object):
     """
-    A mapping from variable names to variables. Variables have flavor, source, and value. The value is an 
+    A mapping from variable names to variables. Variables have flavor, source, and value. The value is an
     expansion object.
     """
 
@@ -279,7 +279,7 @@ class Variables(object):
                     pvalue.concat(valueexp)
 
                     return pflavor, psource, pvalue
-                    
+
             if not expand:
                 return flavor, source, valuestr
 
@@ -621,7 +621,7 @@ class RemakeRuleContext(object):
             if not self.makefile.keepgoing:
                 self.resolvecb(error=True, didanything=self.didanything)
                 return
-        
+
         if len(self.resolvelist):
             dep, weak = self.resolvelist.pop(0)
             self.makefile.context.defer(dep.make,
@@ -677,7 +677,12 @@ class RemakeRuleContext(object):
             return
 
         if len(self.commands):
-            self.commands.pop(0)(self._commandcb)
+            command = self.commands.pop(0)
+
+            if self.makefile.callback:
+                self.makefile.callback.oncommandrun(self.makefile, self.target, command)
+
+            command(self._commandcb)
         else:
             self.runcb(error=False)
 
@@ -686,6 +691,9 @@ class RemakeRuleContext(object):
         self.running = True
 
         self.runcb = cb
+
+        if self.makefile.callback:
+            self.makefile.callback.onrulecontextprocesscommands(self, indent)
 
         if self.rule is None or not len(self.rule.commands):
             if self.target.mtime is None:
@@ -821,7 +829,7 @@ class Target(object):
 
             for ri in r.matchesfor(dir, file, hasmatch):
                 candidates.append(ri)
-            
+
         newcandidates = []
 
         for r in candidates:
@@ -895,7 +903,7 @@ class Target(object):
                     " -> ".join(targetstack), self.target))
 
         targetstack = targetstack + [self.target]
-        
+
         indent = getindent(targetstack)
 
         _log.info("%sConsidering target '%s'", indent, self.target)
@@ -989,7 +997,7 @@ class Target(object):
 
         self.vpathtarget = self.target
         self.mtime = None
-        
+
     def beingremade(self):
         """
         When we remake ourself, we need to reset our mtime and vpathtarget.
@@ -1007,7 +1015,10 @@ class Target(object):
         self._state = MAKESTATE_FINISHED
         for cb in self._callbacks:
             makefile.context.defer(cb, error=self.error, didanything=self.didanything)
-        del self._callbacks 
+        del self._callbacks
+
+        if makefile.callback:
+            makefile.callback.ontargetfinish(makefile, self)
 
     def make(self, makefile, targetstack, cb, avoidremakeloop=False, printerror=True):
         """
@@ -1030,17 +1041,20 @@ class Target(object):
         """
 
         serial = makefile.context.jcount == 1
-        
+
         if self._state == MAKESTATE_FINISHED:
             cb(error=self.error, didanything=self.didanything)
             return
-            
+
         if self._state == MAKESTATE_WORKING:
             assert not serial
             self._callbacks.append(cb)
             return
 
         assert self._state == MAKESTATE_NONE
+
+        if makefile.callback:
+            makefile.callback.ontargetmakebegin(makefile, self, targetstack)
 
         self._state = MAKESTATE_WORKING
         self._callbacks = [cb]
@@ -1084,6 +1098,9 @@ class Target(object):
 
         targetstack = targetstack + [self.target]
 
+        if makefile.callback:
+            makefile.callback.ontargetprocessrules(makefile, self, indent, rulelist)
+
         if serial:
             RemakeTargetSerially(self, makefile, indent, rulelist)
         else:
@@ -1110,7 +1127,7 @@ def setautomaticvariables(v, makefile, target, prerequisites):
     prall = [pt.vpathtarget for pt in prtargets]
     proutofdate = [pt.vpathtarget for pt in withoutdups(prtargets)
                    if target.realmtime is None or mtimeislater(pt.mtime, target.realmtime)]
-    
+
     setautomatic(v, '@', [target.vpathtarget])
     if len(prall):
         setautomatic(v, '<', [prall[0]])
@@ -1364,6 +1381,64 @@ class _RemakeContext(object):
 
             self.cb(remade=False)
 
+class MakefileCallback(object):
+    '''
+    Abstract base class for makefile callbacks.
+
+    Callbacks passed as the callback argument to Makefile() should be derived
+    of this class. Various methods are called during different phases of
+    Makefile execution. Each method is documented below.
+
+    Implementations must be designed with the multi-processing model of pymake
+    in mind. pymake spawns off new processes, so changes to the class may not
+    be reflected in future invokations because of when the process was forked.
+    Therefore, implementations must use some kind of IPC or locking if writing
+    to a central data structure.
+    '''
+
+    def onmakebegin(self, makefile, targetlist):
+        '''Handler called when makefile is remake'd
+
+        Receives the Makefile instance and the list of targets being made.
+        '''
+        raise Exception('onremakebegin() not implemented')
+
+    def onmakefinish(self, makefile):
+        '''Handler called when makefile is done making
+
+        Receives the Makefile instance that just finished'''
+        raise Exception('onmakedone() not implemented')
+
+    def ontargetmakebegin(self, makefile, target, stacklist):
+        '''Handler called when target in Makefile calls make()
+
+        Receives the Makefile and target being made and the target stack.'''
+        raise Exception('ontargetmakebegin() not implemented')
+
+    def ontargetfinish(self, makefile, target):
+        '''Handler called when target in Makefile finishes
+
+        Receives the Makefile and target.'''
+        raise Exception('ontargetfinish() not implemented')
+
+    def ontargetprocessrules(self, makefile, target, indent, rules):
+        '''Handler called when target starts actually processing its rules.
+
+        Receives the Makefile, target, indent level, and list of rules to
+        process.'''
+        raise Exception('ontargetprocessrules() not implemented')
+
+    def onrulecontextprocesscommands(self, context, indent):
+        '''Handler called when RuleContext.processcommands() is called'''
+
+        raise Exception('onrulecontextprocesscommands() not implemented')
+
+    def oncommandrun(self, makefile, target, command):
+        '''Handler called when a command is executed
+
+        Receives the Makefile, target, and the command'''
+        raise Exception('oncommandrun() not implemented')
+
 class Makefile(object):
     """
     The top-level data structure for makefile execution. It holds Targets, implicit rules, and other
@@ -1373,7 +1448,16 @@ class Makefile(object):
     def __init__(self, workdir=None, env=None, restarts=0, make=None,
                  makeflags='', makeoverrides='',
                  makelevel=0, context=None, targets=(), keepgoing=False,
-                 silent=False, justprint=False):
+                 silent=False, justprint=False, callback=None):
+        '''Create a new Makefile.
+
+        Keyword arguments:
+        workdir -- Working directory the Makefile should execute in
+        env     -- dictionary of environment variables during execution
+        ...
+        callback -- Class instance of MakefileCallback that handles events
+                    during Makefile execution
+        '''
         self.defaulttarget = None
 
         if env is None:
@@ -1383,12 +1467,22 @@ class Makefile(object):
         self.variables = Variables()
         self.variables.readfromenvironment(env)
 
+        if not context:
+            raise Exception('context parameter must be defined')
         self.context = context
+
         self.exportedvars = {}
         self._targets = {}
         self.keepgoing = keepgoing
         self.silent = silent
         self.justprint = justprint
+
+        if callback is not None and not isinstance(callback, MakefileCallback):
+            raise Exception(
+                'callback parameter not subclass of MakefileCallback'
+            )
+        self.callback = callback
+
         self._patternvariables = [] # of (pattern, variables)
         self.implicitrules = []
         self.parsingfinished = False
@@ -1566,6 +1660,9 @@ class Makefile(object):
             oldmtime = t.mtime
 
             mlist.append((t, oldmtime))
+
+        if self.callback:
+            self.callback.onmakebegin(self, mlist)
 
         _RemakeContext(self, cb)
 
