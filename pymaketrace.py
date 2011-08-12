@@ -31,6 +31,11 @@ def main(argv):
                   default=False,
                   action='store_true',
                   help='Print a tree showing the execution order')
+    op.add_option('--print-job-times',
+                  dest='print_job_times',
+                  default=False,
+                  action='store_true',
+                  help='Print wall clock execution times of all jobs')
 
     options, args = op.parse_args()
 
@@ -58,6 +63,20 @@ def main(argv):
 
         if options.print_execution_tree:
             parser.print_execution_tree(sys.stdout)
+
+        if options.print_job_times:
+            for j in parser.get_jobs():
+                l = []
+                if j['executable']:
+                    l.append(j['executable'])
+
+                if j['shell']:
+                    l.append(j['argv'])
+                else:
+                    l.extend(j['argv'])
+
+                command = ' '.join(l).replace('\n', '\\n')
+                print '%f\t%s' % ( j['wall_time'], command )
 
 if __name__ == '__main__':
     main(sys.argv[1:])

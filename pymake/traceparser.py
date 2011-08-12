@@ -63,6 +63,36 @@ class TraceParser(object):
         self.parse_file(callback)
         return targets
 
+    def get_jobs(self):
+        '''Returns a list of jobs executed during trace.'''
+
+        jobs = {}
+        all = []
+
+        def callback(action, time, data, context):
+            if action == 'JOB_START':
+                jobs[data['id']] = ( time, data )
+                return
+
+            if action == 'JOB_FINISH':
+                id = data['id']
+
+                # If this happens, the tracer is whacked.
+                # TODO log a warning or something
+                if id not in jobs:
+                    return
+
+                job = jobs[id]
+
+                data = job[1]
+                data['wall_time'] = time - job[0]
+                all.append(data)
+
+                del jobs[id]
+
+        self.parse_file(callback, jobs)
+        return all
+
     def get_executed_commands(self):
         '''Obtains a list of commands that were invoked during make process'''
 
