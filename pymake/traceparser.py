@@ -20,11 +20,13 @@ class TraceParser(object):
 
             self.root_dir = data[1]['dir']
 
-    def _parse_file(self, callback):
+    def parse_file(self, callback, context=None):
+        '''Parse the file the class was constructed with and call the
+        supplied function with each event read'''
         with open(self.path, 'r') as f:
             for line in f:
                 o = json.loads(line)
-                callback(o[0], o[1])
+                callback(o[0], o[1], context)
 
     def get_target_execution_counts(self):
         '''Obtain a dictionary of target execution counts.
@@ -34,7 +36,7 @@ class TraceParser(object):
 
         targets = {}
 
-        def callback(action, data):
+        def callback(action, data, context):
             if action != 'TARGET_BEGIN':
                 return
 
@@ -48,7 +50,7 @@ class TraceParser(object):
             else:
                 targets[fullname] = 1
 
-        self._parse_file(callback)
+        self.parse_file(callback)
         return targets
 
     def get_executed_commands(self):
@@ -56,13 +58,16 @@ class TraceParser(object):
 
         commands = []
 
-        def callback(action, data):
+        def callback(action, data, context):
             if action != 'COMMAND_RUN':
+                return
+
+            if not len(data['cmd']):
                 return
 
             commands.append((data['dir'], data['target'], data['cmd']))
 
-        self._parse_file(callback)
+        self.parse_file(callback)
 
         return commands
 
@@ -114,3 +119,41 @@ class TraceParser(object):
         return {
             'counts': command_counts
         }
+
+    def print_execution_tree(self, f):
+        context = {
+            'current_dir': self.root_dir,
+            'level': 0
+        }
+
+        def callback(action, data, context):
+            if action == 'MAKEFILE_BEGIN':
+                dir = data['dir']
+                assert dir.find(self.root_dir) == 0
+
+                context['current_dir'] = dir[len(self.root_dir):]
+                print >> f, '%sNEW MAKEFILE: %s' % ( ' ' * context['level'], context['current_dir'] )
+                context['level'] += 1
+
+            elif action == 'MAKEFILE_FINISH':
+                context['level'] -= 1
+                print >> f, '%sEND MAKEFILE' % ( ' ' * context['level'] )
+
+            elif action == 'TARGET_BEGIN':
+                name = data['target']
+
+                print >> f, '%sBEGIN TARGET: %s' % ( ' ' * context['level'], name )
+                context['level'] += 1
+
+            elif action == 'TARGET_FINISH':
+                name = data['target']
+
+                context['level'] -= 1
+                print >> f, '%sEND TARGET %s' % ( ' ' * context['level'], name )
+
+            elif action == 'COMMAND_RUN':
+                command = data['cmd']
+
+                print >> f, '%s$ %s' % ( ' ' * context['level'], command )
+
+        self.parse_file(callback, context)

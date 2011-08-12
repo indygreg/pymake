@@ -26,6 +26,11 @@ def main(argv):
                   default=False,
                   action='store_true',
                   help='Print counts of how often individual commands were executed')
+    op.add_option('--print-execution-tree',
+                  dest='print_execution_tree',
+                  default=False,
+                  action='store_true',
+                  help='Print a tree showing the execution order')
 
     options, args = op.parse_args()
 
@@ -42,7 +47,7 @@ def main(argv):
                 print '%d\t%s' % ( v, k )
 
         if options.print_command_list:
-            commands = parser.get_commands()
+            commands = parser.get_executed_commands()
             for c in commands:
                 print c[2]
 
@@ -50,6 +55,9 @@ def main(argv):
             data = parser.get_executed_commands_report()
             for k, v in data['counts'].iteritems():
                 print '%d\t%s' % ( v, k )
+
+        if options.print_execution_tree:
+            parser.print_execution_tree(sys.stdout)
 
 if __name__ == '__main__':
     main(sys.argv[1:])
