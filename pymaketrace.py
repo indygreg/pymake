@@ -36,6 +36,11 @@ def main(argv):
                   default=False,
                   action='store_true',
                   help='Print wall clock execution times of all jobs')
+    op.add_option('--print-aggregate-job-times',
+                  dest='print_aggregate_job_times',
+                  default=False,
+                  action='store_true',
+                  help='Like --print-job-times except it sums jobs of the same command')
 
     options, args = op.parse_args()
 
@@ -66,17 +71,11 @@ def main(argv):
 
         if options.print_job_times:
             for j in parser.get_jobs():
-                l = []
-                if j['executable']:
-                    l.append(j['executable'])
+                print '%f\t%s' % ( j['wall_time'], j['friendly_exec'] )
 
-                if j['shell']:
-                    l.append(j['argv'])
-                else:
-                    l.extend(j['argv'])
-
-                command = ' '.join(l).replace('\n', '\\n')
-                print '%f\t%s' % ( j['wall_time'], command )
+        if options.print_aggregate_job_times:
+            for j in parser.get_aggregate_jobs():
+                print '%f\t%d\t%s' % ( j['wall_time'], j['count'], j['name'] )
 
 if __name__ == '__main__':
     main(sys.argv[1:])

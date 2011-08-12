@@ -32,8 +32,12 @@ class TraceParser(object):
         '''
         with open(self.path, 'r') as f:
             for line in f:
-                o = json.loads(line)
-                callback(o[0], o[1], o[2], context)
+                try:
+                    o = json.loads(line)
+                    callback(o[0], o[1], o[2], context)
+
+                except ValueError, e:
+                    pass
 
     def get_target_execution_counts(self):
         '''Obtain a dictionary of target execution counts.
@@ -88,10 +92,66 @@ class TraceParser(object):
                 data['wall_time'] = time - job[0]
                 all.append(data)
 
+                l = []
+                if data['executable']:
+                    l.append(data['executable'])
+
+                if data['shell']:
+                    l.append(data['argv'])
+                else:
+                    l.extend(data['argv'])
+
+                data['friendly_exec'] = ' '.join(l).replace('\n', '\\n')
+
                 del jobs[id]
 
         self.parse_file(callback, jobs)
         return all
+
+    def get_aggregate_jobs(self):
+        '''Obtains job information then combines similar jobs.'''
+
+        # Keys are normalized job type
+        jobs = {}
+
+        def create_record(name):
+            return {
+                'count': 0,
+                'name': name,
+                'wall_time': 0.0,
+            }
+
+        for job in self.get_jobs():
+            record = None
+
+            if job['shell']:
+                if 'shell' in jobs:
+                    record = jobs['shell']
+                else:
+                    record = create_record('shell')
+
+            elif job['executable']:
+                normalized = os.path.normpath(job['executable'])
+
+                if normalized in jobs:
+                    record = jobs[normalized]
+                else:
+                    record = create_record(normalized)
+            else:
+                command = job['argv'][0]
+
+                if command in jobs:
+                    record = jobs[command]
+                else:
+                    record = create_record(command)
+
+            record['count'] += 1
+            record['wall_time'] += job['wall_time']
+
+            jobs[record['name']] = record
+
+        return jobs.values()
+
 
     def get_executed_commands(self):
         '''Obtains a list of commands that were invoked during make process'''
