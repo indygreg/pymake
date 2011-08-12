@@ -1,3 +1,5 @@
+# Authored by Gregory Szorc <gregory.szorc@gmail.com>. All rights reserved.
+
 import json
 import os.path
 
