@@ -43,7 +43,10 @@ class TraceParser(object):
             name = data['target']
             dir = data['dir']
 
-            fullname = '%s%s' % ( dir, name )
+            fullname = os.path.normpath(os.path.join(dir, name))
+
+            if fullname.find(self.root_dir) == 0:
+                fullname = fullname[len(self.root_dir):]
 
             if fullname in targets:
                 targets[fullname] += 1
