@@ -8,7 +8,7 @@ except when a submake specifies -j1 when the parent make is building in parallel
 
 import os, os.path, subprocess, sys, logging, time, traceback, re, errno, json
 from optparse import OptionParser
-import data, parserdata, process, util
+import data, parserdata, process, util, fcntl
 
 # TODO: If this ever goes from relocatable package to system-installed, this may need to be
 # a configured-in path.
@@ -74,10 +74,8 @@ _log = logging.getLogger('pymake.execution')
 
 class Tracer(data.MakefileCallback):
     '''MakefileCallback that writes to a trace log'''
-    def __init__(self, path, wait_timeout=5):
+    def __init__(self, path):
         self.path = path
-        self.lockpath = '%s.lock' % path
-        self.locked = False
         self.rootpid = os.getpid()
         self.f = None
 
@@ -96,38 +94,11 @@ class Tracer(data.MakefileCallback):
         now = time.time()
 
         self._open()
-        self._acquire_lock()
+        fcntl.flock(self.f, fcntl.LOCK_EX)
         json.dump([action, now, data], self.f)
         self.f.write('\n')
         self.f.flush()
-        self._release_lock()
-
-    def _acquire_lock(self):
-        while True:
-            try:
-                fd = os.open(self.lockpath, os.O_CREAT|os.O_EXCL|os.O_RDWR, 0777)
-                self.flock = os.fdopen(fd)
-                break
-            except OSError as e:
-                if e.errno == errno.EEXIST:
-                    continue
-
-                if e.errno == errno.EACCES:
-                    continue
-
-                raise
-
-        self.locked = True
-
-    def _release_lock(self):
-        if self.locked:
-            self.flock.close()
-            os.unlink(self.lockpath)
-            self.locked = False
-
-    def __del__(self):
-        '''Clean up after ourselves, just in case'''
-        self._release_lock()
+        fcntl.flock(self.f, fcntl.LOCK_UN)
 
     def onmakebegin(self, makefile, targets):
         variables = {}
