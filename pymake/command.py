@@ -87,11 +87,17 @@ class Tracer(data.MakefileCallback):
         if os.getpid() != self.rootpid or not self.f:
             self.f = open(self.path, 'a')
 
-    def _write(self, o):
-        '''Write a new string to the output file lockingly'''
+    def _write(self, action, data):
+        '''Write a new entry to the output file lockingly'''
+        # Ideally we'd use some kind of clock that increments without
+        # the potential for skew because all we really care about are
+        # relative wall clock timings. Unfortunately, it doesn't appear Python
+        # currently has such a clock.
+        now = time.time()
+
         self._open()
         self._acquire_lock()
-        json.dump(o, self.f)
+        json.dump([action, now, data], self.f)
         self.f.write('\n')
         self.f.flush()
         self._release_lock()
@@ -134,13 +140,13 @@ class Tracer(data.MakefileCallback):
             'included': makefile.included,
         }
 
-        self._write([ 'MAKEFILE_BEGIN', data ])
+        self._write('MAKEFILE_BEGIN', data)
 
     def onmakefinish(self, makefile):
         data = {
             'dir': makefile.workdir,
         }
-        self._write([ 'MAKEFILE_FINISH', data ])
+        self._write('MAKEFILE_FINISH', data)
 
     def ontargetmakebegin(self, makefile, target, targetstack):
         variables = {}
@@ -153,7 +159,7 @@ class Tracer(data.MakefileCallback):
             'vpath': target.vpathtarget,
             'variables': variables,
         }
-        self._write([ 'TARGET_BEGIN', data ])
+        self._write('TARGET_BEGIN', data)
 
     def ontargetfinish(self, makefile, target):
         data = {
@@ -161,7 +167,7 @@ class Tracer(data.MakefileCallback):
             'target': target.target,
             'vpath': target.vpathtarget,
         }
-        self._write([ 'TARGET_FINISH', data ])
+        self._write('TARGET_FINISH', data)
 
     def ontargetprocessrules(self, makefile, target, indent, rules):
         data = {
@@ -169,7 +175,7 @@ class Tracer(data.MakefileCallback):
             'target': target.target,
             'indent': indent,
         }
-        self._write([ 'TARGET_PROCESS_RULES', data ])
+        self._write('TARGET_PROCESS_RULES', data)
 
     def onrulecontextprocesscommands(self, context, indent):
         data = {
@@ -177,7 +183,7 @@ class Tracer(data.MakefileCallback):
             'target': context.target.target,
             'rule': str(context.rule),
         }
-        self._write([ 'RULE_CONTEXT_PROCESS_COMMANDS', data ])
+        self._write('RULE_CONTEXT_PROCESS_COMMANDS', data)
 
     def oncommandcreate(self, makefile, target, prerequisites, command):
         data = {
@@ -189,7 +195,7 @@ class Tracer(data.MakefileCallback):
             'cmd': command.cline
         }
 
-        self._write([ 'COMMAND_CREATE', data ])
+        self._write('COMMAND_CREATE', data)
 
     def onjobstart(self, type, job):
         data = {
@@ -204,7 +210,7 @@ class Tracer(data.MakefileCallback):
             #data['env']        = job.env
             data['cwd']        = job.cwd
 
-        self._write([ 'JOB_START', data ])
+        self._write('JOB_START', data)
 
     def onjobfinish(self, type, job, result):
         data = {
@@ -213,7 +219,7 @@ class Tracer(data.MakefileCallback):
             'result': result,
         }
 
-        self._write([ 'JOB_FINISH', data ])
+        self._write('JOB_FINISH', data)
 
 class _MakeContext(object):
     def __init__(self, makeflags, makelevel, workdir, context, env, targets, options, ostmts, overrides, cb):

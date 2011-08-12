@@ -18,15 +18,22 @@ class TraceParser(object):
 
             assert data[0] == 'MAKEFILE_BEGIN'
 
-            self.root_dir = data[1]['dir']
+            self.root_dir = data[2]['dir']
 
     def parse_file(self, callback, context=None):
         '''Parse the file the class was constructed with and call the
-        supplied function with each event read'''
+        supplied function with each event read
+
+        The callback will receive in the following order:
+          - str action performed
+          - float time action performed
+          - dict data in action
+          - context passed into method
+        '''
         with open(self.path, 'r') as f:
             for line in f:
                 o = json.loads(line)
-                callback(o[0], o[1], context)
+                callback(o[0], o[1], o[2], context)
 
     def get_target_execution_counts(self):
         '''Obtain a dictionary of target execution counts.
@@ -36,7 +43,7 @@ class TraceParser(object):
 
         targets = {}
 
-        def callback(action, data, context):
+        def callback(action, time, data, context):
             if action != 'TARGET_BEGIN':
                 return
 
@@ -61,7 +68,7 @@ class TraceParser(object):
 
         commands = []
 
-        def callback(action, data, context):
+        def callback(action, time, data, context):
             if action != 'COMMAND_CREATE':
                 return
 
@@ -132,7 +139,7 @@ class TraceParser(object):
             'level': 0
         }
 
-        def callback(action, data, context):
+        def callback(action, time, data, context):
             if action == 'MAKEFILE_BEGIN':
                 dir = data['dir']
                 assert dir.find(self.root_dir) == 0
