@@ -89,11 +89,14 @@ class TraceParser(object):
             if not len(params):
                 continue
 
-            base = os.path.basename(params[0])
+            orig = params[0]
+            base = os.path.basename(orig)
 
             # Many commands are wrapped by the main python executable. We
             # drill into them.
-            if base.find('python') != -1:
+            # TODO this should probably be a positive filter instead of a
+            # negative one
+            if base.find('python') != -1 and base != 'pythonpath':
                 if len(params) < 2:
                     if base in command_counts:
                         command_counts[base] += 1
@@ -114,10 +117,10 @@ class TraceParser(object):
                 else:
                     command_counts[real] = 1
             else:
-                if base in command_counts:
-                    command_counts[base] += 1
+                if orig in command_counts:
+                    command_counts[orig] += 1
                 else:
-                    command_counts[base] = 1
+                    command_counts[orig] = 1
 
         return {
             'counts': command_counts
