@@ -5,7 +5,7 @@ parsing command lines into argv and making sure that no shell magic is being use
 
 #TODO: ship pyprocessing?
 import multiprocessing, multiprocessing.dummy
-import subprocess, shlex, re, logging, sys, traceback, os, imp
+import subprocess, shlex, re, logging, sys, traceback, os, imp, uuid
 # XXXkhuey Work around http://bugs.python.org/issue1731717
 subprocess._cleanup = lambda: None
 import command, util
@@ -35,14 +35,15 @@ def clinetoargv(cline):
     return args, None
 
 shellwords = (':', '.', 'break', 'cd', 'continue', 'exec', 'exit', 'export',
-              'getopts', 'hash', 'pwd', 'readonly', 'return', 'shift', 
+              'getopts', 'hash', 'pwd', 'readonly', 'return', 'shift',
               'test', 'times', 'trap', 'umask', 'unset', 'alias',
               'set', 'bind', 'builtin', 'caller', 'command', 'declare',
-              'echo', 'enable', 'help', 'let', 'local', 'logout', 
+              'echo', 'enable', 'help', 'let', 'local', 'logout',
               'printf', 'read', 'shopt', 'source', 'type', 'typeset',
               'ulimit', 'unalias', 'set')
 
-def call(cline, env, cwd, loc, cb, context, echo, justprint=False):
+def call(cline, env, cwd, loc, cb, context, echo, justprint=False,
+         probe_callback=None, id=None):
     #TODO: call this once up-front somewhere and save the result?
     shell, msys = util.checkmsyscompat()
 
@@ -63,7 +64,7 @@ def call(cline, env, cwd, loc, cb, context, echo, justprint=False):
                 cline = '/' + cline[0] + cline[2:]
             cline = [shell, "-c", cline]
         context.call(cline, shell=not msys, env=env, cwd=cwd, cb=cb, echo=echo,
-                     justprint=justprint)
+                     justprint=justprint, probe_callback=probe_callback, id=id)
         return
 
     if not len(argv):
@@ -85,12 +86,14 @@ def call(cline, env, cwd, loc, cb, context, echo, justprint=False):
         executable = None
 
     context.call(argv, executable=executable, shell=False, env=env, cwd=cwd, cb=cb,
-                 echo=echo, justprint=justprint)
+                 echo=echo, justprint=justprint, probe_callback=probe_callback)
 
 def call_native(module, method, argv, env, cwd, loc, cb, context, echo, justprint=False,
-                pycommandpath=None):
+                pycommandpath=None, probe_callback=None, id=None):
     context.call_native(module, method, argv, env=env, cwd=cwd, cb=cb,
-                        echo=echo, justprint=justprint, pycommandpath=pycommandpath)
+                        echo=echo, justprint=justprint,
+                        pycommandpath=pycommandpath,
+                        probe_callback=probe_callback, id=id)
 
 def statustoresult(status):
     """
@@ -108,8 +111,13 @@ class Job(object):
     """
     done = False # set to true when the job completes
 
-    def __init__(self):
+    def __init__(self, id=None):
         self.exitcode = -127
+
+        self.id = id
+
+        if not id:
+            self.id = uuid.uuid1()
 
     def notify(self, condition, result):
         condition.acquire()
@@ -125,21 +133,32 @@ class PopenJob(Job):
     """
     A job that executes a command using subprocess.Popen.
     """
-    def __init__(self, argv, executable, shell, env, cwd):
-        Job.__init__(self)
+    def __init__(self, argv, executable, shell, env, cwd, probe_callback=None, id=None):
+        Job.__init__(self, id=id)
         self.argv = argv
         self.executable = executable
         self.shell = shell
         self.env = env
         self.cwd = cwd
+        self.callback = probe_callback
 
     def run(self):
+        if self.callback:
+            self.callback.onjobstart('popen', self)
+
+        result = None
+
         try:
             p = subprocess.Popen(self.argv, executable=self.executable, shell=self.shell, env=self.env, cwd=self.cwd)
-            return p.wait()
+            result = p.wait()
         except OSError, e:
             print >>sys.stderr, e
-            return -127
+            result = -127
+        finally:
+            if self.callback:
+                self.callback.onjobfinish('popen', self, result)
+
+        return result
 
 class PythonException(Exception):
     def __init__(self, message, exitcode):
@@ -170,16 +189,23 @@ class PythonJob(Job):
     """
     A job that calls a Python method.
     """
-    def __init__(self, module, method, argv, env, cwd, pycommandpath=None):
+    def __init__(self, module, method, argv, env, cwd, pycommandpath=None,
+                 probe_callback=None, id=None):
+        Job.__init__(self, id=id)
         self.module = module
         self.method = method
         self.argv = argv
         self.env = env
         self.cwd = cwd
         self.pycommandpath = pycommandpath or []
+        self.callback = probe_callback
 
     def run(self):
+        if self.callback:
+            self.callback.onjobstart('python', self)
+
         oldenv = os.environ
+        result = None
         try:
             os.chdir(self.cwd)
             os.environ = self.env
@@ -188,21 +214,28 @@ class PythonJob(Job):
                                       sys.path + self.pycommandpath)
             if self.module not in sys.modules:
                 print >>sys.stderr, "No module named '%s'" % self.module
-                return -127                
+                result = -127
+                return result
             m = sys.modules[self.module]
             if self.method not in m.__dict__:
                 print >>sys.stderr, "No method named '%s' in module %s" % (method, module)
-                return -127
+                result = -127
+                return result
             m.__dict__[self.method](self.argv)
+            result = 0
         except PythonException, e:
             print >>sys.stderr, e
-            return e.exitcode
+            result = e.exitcode
         except:
             print >>sys.stderr, sys.exc_info()[1]
-            return -127
+            result = -127
         finally:
             os.environ = oldenv
-        return 0
+
+            if self.callback:
+                self.callback.onjobfinish('python', self, result)
+
+        return result
 
 def job_runner(job):
     """
@@ -256,21 +289,25 @@ class ParallelContext(object):
             pool.apply_async(job_runner, args=(job,), callback=processcb)
         self.running.append((job, cb))
 
-    def call(self, argv, shell, env, cwd, cb, echo, justprint=False, executable=None):
+    def call(self, argv, shell, env, cwd, cb, echo, justprint=False,
+             executable=None, probe_callback=None, id=None):
         """
         Asynchronously call the process
         """
 
-        job = PopenJob(argv, executable=executable, shell=shell, env=env, cwd=cwd)
+        job = PopenJob(argv, executable=executable, shell=shell, env=env,
+                       cwd=cwd, probe_callback=probe_callback, id=id)
         self.defer(self._docall_generic, self.threadpool, job, cb, echo, justprint)
 
     def call_native(self, module, method, argv, env, cwd, cb,
-                    echo, justprint=False, pycommandpath=None):
+                    echo, justprint=False, pycommandpath=None,
+                    probe_callback=None, id=None):
         """
         Asynchronously call the native function
         """
 
-        job = PythonJob(module, method, argv, env, cwd, pycommandpath)
+        job = PythonJob(module, method, argv, env, cwd, pycommandpath,
+                        id=id)
         self.defer(self._docall_generic, self.processpool, job, cb, echo, justprint)
 
     @staticmethod
@@ -300,7 +337,7 @@ class ParallelContext(object):
         condition.release()
 
         return jobs
-        
+
     @staticmethod
     def spin():
         """

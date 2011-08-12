@@ -2,7 +2,7 @@
 A representation of makefile data structures.
 """
 
-import logging, re, os, sys
+import logging, re, os, sys, uuid
 import parserdata, parser, functions, process, util, implicit
 from cStringIO import StringIO
 
@@ -677,12 +677,7 @@ class RemakeRuleContext(object):
             return
 
         if len(self.commands):
-            command = self.commands.pop(0)
-
-            if self.makefile.callback:
-                self.makefile.callback.oncommandrun(self.makefile, self.target, command)
-
-            command(self._commandcb)
+            self.commands.pop(0)(self._commandcb)
         else:
             self.runcb(error=False)
 
@@ -1173,12 +1168,15 @@ def findmodifiers(command):
     return realcommand, '@' in modset, '+' in modset, '-' in modset, '%' in modset
 
 class _CommandWrapper(object):
-    def __init__(self, cline, ignoreErrors, loc, context, **kwargs):
+    def __init__(self, cline, ignoreErrors, loc, context, callback, **kwargs):
         self.ignoreErrors = ignoreErrors
         self.loc = loc
         self.cline = cline
         self.kwargs = kwargs
         self.context = context
+        self.callback = callback
+
+        self.id = uuid.uuid1()
 
     def _cb(self, res):
         if res != 0 and not self.ignoreErrors:
@@ -1189,12 +1187,18 @@ class _CommandWrapper(object):
 
     def __call__(self, cb):
         self.usercb = cb
-        process.call(self.cline, loc=self.loc, cb=self._cb, context=self.context, **self.kwargs)
+        process.call(self.cline,
+                     loc=self.loc,
+                     cb=self._cb,
+                     context=self.context,
+                     probe_callback=self.callback,
+                     id=self.id,
+                     **self.kwargs)
 
 class _NativeWrapper(_CommandWrapper):
     def __init__(self, cline, ignoreErrors, loc, context,
-                 pycommandpath, **kwargs):
-        _CommandWrapper.__init__(self, cline, ignoreErrors, loc, context,
+                 pycommandpath, callback, **kwargs):
+        _CommandWrapper.__init__(self, cline, ignoreErrors, loc, context, callback,
                                  **kwargs)
         # get the module and method to call
         parts, badchar = process.clinetoargv(cline)
@@ -1213,9 +1217,16 @@ class _NativeWrapper(_CommandWrapper):
 
     def __call__(self, cb):
         self.usercb = cb
-        process.call_native(self.module, self.method, self.cline_list,
-                            loc=self.loc, cb=self._cb, context=self.context,
-                            pycommandpath=self.pycommandpath, **self.kwargs)
+        process.call_native(self.module,
+                            self.method,
+                            self.cline_list,
+                            loc=self.loc,
+                            cb=self._cb,
+                            context=self.context,
+                            pycommandpath=self.pycommandpath,
+                            probe_callback=self.callback,
+                            id=self.id,
+                            **self.kwargs)
 
 def getcommandsforrule(rule, target, makefile, prerequisites, stem):
     v = Variables(parent=target.variables)
@@ -1233,19 +1244,39 @@ def getcommandsforrule(rule, target, makefile, prerequisites, stem):
                 echo = None
             else:
                 echo = "%s$ %s" % (c.loc, cline)
+
+            command = None
+
             if not isNative:
-                yield _CommandWrapper(cline, ignoreErrors=ignoreErrors, env=env, cwd=makefile.workdir, loc=c.loc, context=makefile.context,
-                                      echo=echo, justprint=makefile.justprint)
+                command = _CommandWrapper(cline,
+                                          ignoreErrors=ignoreErrors,
+                                          env=env,
+                                          cwd=makefile.workdir,
+                                          loc=c.loc,
+                                          context=makefile.context,
+                                          echo=echo,
+                                          justprint=makefile.justprint,
+                                          callback=makefile.callback)
             else:
                 f, s, e = v.get("PYCOMMANDPATH", True)
                 if e:
                     e = e.resolvestr(makefile, v, ["PYCOMMANDPATH"])
-                yield _NativeWrapper(cline, ignoreErrors=ignoreErrors,
-                                     env=env, cwd=makefile.workdir,
-                                     loc=c.loc, context=makefile.context,
-                                     echo=echo, justprint=makefile.justprint,
-                                     pycommandpath=e)
+                command = _NativeWrapper(cline,
+                                         ignoreErrors=ignoreErrors,
+                                         env=env,
+                                         cwd=makefile.workdir,
+                                         loc=c.loc,
+                                         context=makefile.context,
+                                         echo=echo,
+                                         justprint=makefile.justprint,
+                                         pycommandpath=e,
+                                         callback=makefile.callback)
 
+            if makefile.callback:
+                makefile.callback.oncommandcreate(makefile, target,
+                                                  prerequisites, command)
+
+            yield command
 class Rule(object):
     """
     A rule contains a list of prerequisites and a list of commands. It may also
@@ -1433,11 +1464,42 @@ class MakefileCallback(object):
 
         raise Exception('onrulecontextprocesscommands() not implemented')
 
-    def oncommandrun(self, makefile, target, command):
-        '''Handler called when a command is executed
+    def oncommandcreate(self, makefile, target, prerequisites, command):
+        '''Handler called when a command is created.
 
-        Receives the Makefile, target, and the command'''
-        raise Exception('oncommandrun() not implemented')
+        The command may not execute immediately, if ever. Commands are
+        eventually converted to jobs, which are executed by things in the
+        pymake.process module. The command and the job share the same UUID
+        in obj.id.
+
+        Receives the Makefile, target, list of prerequisites, and the
+        command.
+        '''
+        raise Exception('oncommandcreate() not implemented')
+
+    def onjobstart(self, type, job):
+        '''Handler called when a Job is about to start execution.
+
+        Receives the type of the job and the Job instance. The value of the
+        first defines the type of the second. The mapping between them is as
+        follows:
+
+         - 'popen'  => process.PopenJob
+         - 'python' => process.PythonJob
+        '''
+        raise Exception('onpopenstart() not implemented')
+
+    def onjobfinish(self, type, job, result):
+        '''Handler called when a job has finished execution
+
+        Receives the string type of job, the Job instance, and the result of
+        the job. The type of the job and result parameters depends on the
+        value of type:
+
+         - 'popen'  => ( process.PopenJob, Int )
+         - 'python' => ( process.PythonJob, Int )
+        '''
+        raise Exception('onopenfinish() not implemented')
 
 class Makefile(object):
     """

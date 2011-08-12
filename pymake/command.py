@@ -179,8 +179,9 @@ class Tracer(data.MakefileCallback):
         }
         self._write([ 'RULE_CONTEXT_PROCESS_COMMANDS', data ])
 
-    def oncommandrun(self, makefile, target, command):
+    def oncommandcreate(self, makefile, target, prerequisites, command):
         data = {
+            'id': str(command.id),
             'dir': makefile.workdir,
             'target': target.target,
             'vpath': target.vpathtarget,
@@ -188,7 +189,31 @@ class Tracer(data.MakefileCallback):
             'cmd': command.cline
         }
 
-        self._write([ 'COMMAND_RUN', data ])
+        self._write([ 'COMMAND_CREATE', data ])
+
+    def onjobstart(self, type, job):
+        data = {
+            'id':   str(job.id),
+            'type': type,
+        }
+
+        if type == 'popen':
+            data['argv'] = job.argv
+            data['executable'] = job.executable
+            data['shell']      = job.shell
+            #data['env']        = job.env
+            data['cwd']        = job.cwd
+
+        self._write([ 'JOB_START', data ])
+
+    def onjobfinish(self, type, job, result):
+        data = {
+            'id':     str(job.id),
+            'type':   type,
+            'result': result,
+        }
+
+        self._write([ 'JOB_FINISH', data ])
 
 class _MakeContext(object):
     def __init__(self, makeflags, makelevel, workdir, context, env, targets, options, ostmts, overrides, cb):

@@ -62,7 +62,7 @@ class TraceParser(object):
         commands = []
 
         def callback(action, data, context):
-            if action != 'COMMAND_RUN':
+            if action != 'COMMAND_CREATE':
                 return
 
             if not len(data['cmd']):
@@ -157,9 +157,15 @@ class TraceParser(object):
                 context['level'] -= 1
                 print >> f, '%sEND TARGET %s' % ( ' ' * context['level'], name )
 
-            elif action == 'COMMAND_RUN':
+            elif action == 'COMMAND_CREATE':
                 command = data['cmd']
 
                 print >> f, '%s$ %s' % ( ' ' * context['level'], command )
+
+            elif action == 'JOB_START':
+                pass
+
+            elif action == 'JOB_FINISH':
+                pass
 
         self.parse_file(callback, context)
