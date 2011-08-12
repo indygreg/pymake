@@ -94,6 +94,12 @@ class Tracer(data.MakefileCallback):
         # currently has such a clock.
         now = time.time()
 
+        # TODO I still think the lock semantics are wrong since PyMake does
+        # indeed fork. I've tried locks on separate files using low-level open
+        # flags like O_EXCL. I've tried fcntl.flock(). But they all seem to
+        # deadlock or get get in loops waiting for the lock. Grrr. I think
+        # the fundamental problem is I don't grok the magic in multiprocess
+        # module land. Another time, perhaps...
         self.lock.acquire()
         self._open()
         json.dump([action, now, data], self.f)
