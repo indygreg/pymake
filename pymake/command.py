@@ -8,7 +8,7 @@ except when a submake specifies -j1 when the parent make is building in parallel
 
 import os, os.path, subprocess, sys, logging, time, traceback, re, errno, json
 from optparse import OptionParser
-import data, parserdata, process, util, fcntl
+import data, parserdata, process, util, threading
 
 # TODO: If this ever goes from relocatable package to system-installed, this may need to be
 # a configured-in path.
@@ -78,6 +78,7 @@ class Tracer(data.MakefileCallback):
         self.path = path
         self.rootpid = os.getpid()
         self.f = None
+        self.lock = threading.Lock()
 
     def _open(self):
         if os.getpid() != self.rootpid:
@@ -93,12 +94,12 @@ class Tracer(data.MakefileCallback):
         # currently has such a clock.
         now = time.time()
 
+        self.lock.acquire()
         self._open()
-        fcntl.flock(self.f, fcntl.LOCK_EX)
         json.dump([action, now, data], self.f)
         self.f.write('\n')
         self.f.flush()
-        fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.lock.release()
 
     def onmakebegin(self, makefile, targets):
         variables = {}
