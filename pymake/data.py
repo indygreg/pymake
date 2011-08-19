@@ -344,6 +344,19 @@ class Variables(object):
     def __contains__(self, item):
         return item in self._map
 
+    def todict(self, makefile):
+        values = {}
+        for k, (flavor, source, value, valueexp) in self._map.iteritems():
+            f, s, expansion = self.get(k)
+            values[k] = {
+                'flavor': flavor,
+                'source': source,
+                'value': value,
+                'expanded': expansion.resolvestr(makefile, self)
+            }
+
+        return values
+
 class Pattern(object):
     """
     A pattern is a string, possibly with a % substitution character. From the GNU make manual:
@@ -769,6 +782,14 @@ class Target(object):
         self.variables = Variables(makefile.variables)
         self.explicit = False
         self._state = MAKESTATE_NONE
+        self.makefile = makefile
+
+    def todict(self):
+        return {
+            'name':        self.target,
+            'vpathtarget': self.vpathtarget,
+            'variables':   self.variables.todict(self.makefile)
+        }
 
     def addrule(self, rule):
         assert isinstance(rule, (Rule, PatternRuleInstance))
@@ -1427,6 +1448,10 @@ class MakefileCallback(object):
     to a central data structure.
     '''
 
+    def onmakefilefinishparsing(self, makefile):
+        '''Handler called when makefile has finished parsing'''
+        raise Exception('onmakefilefinishparsing() not implemented')
+
     def onmakebegin(self, makefile, targetlist):
         '''Handler called when makefile is remake'd
 
@@ -1595,6 +1620,23 @@ class Makefile(object):
                                Variables.FLAVOR_SIMPLE,
                                Variables.SOURCE_IMPLICIT, val)
 
+    def todict(self):
+        ret = {
+            #'env':          self.env,
+            'exportedvars': self.exportedvars,
+            'workdir':      self.workdir,
+            'variables':    self.variables.todict(self),
+        }
+
+        targets = {}
+
+        for k, v in self._targets.iteritems():
+           targets[k] = v.todict()
+
+        ret['targets'] = targets
+
+        return ret
+
     def foundtarget(self, t):
         """
         Inform the makefile of a target which is a candidate for being the default target,
@@ -1675,6 +1717,9 @@ class Makefile(object):
             self.context = process.getcontext(1)
 
         self.error = False
+
+        if self.callback:
+            self.callback.onmakefilefinishparsing(self)
 
     def include(self, path, required=True, weak=False, loc=None):
         """

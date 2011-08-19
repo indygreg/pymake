@@ -107,6 +107,11 @@ class Tracer(data.MakefileCallback):
         self.f.flush()
         self.lock.release()
 
+    def onmakefilefinishparsing(self, makefile):
+        data = makefile.todict()
+        print data
+        self._write('MAKEFILE_FINISH_PARSING', makefile.todict())
+
     def onmakebegin(self, makefile, targets):
         variables = {}
         for (k, flavor, source, value) in makefile.variables:
