@@ -16,7 +16,7 @@ class TraceParser(object):
             l = f.readline()
             data = json.loads(l)
 
-            assert data[0] == 'MAKEFILE_BEGIN'
+            assert data[0] == 'PYMAKE_BEGIN'
 
             self.root_dir = data[2]['dir']
 

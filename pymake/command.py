@@ -8,7 +8,7 @@ except when a submake specifies -j1 when the parent make is building in parallel
 
 import os, os.path, subprocess, sys, logging, time, traceback, re, errno, json
 from optparse import OptionParser
-import data, parserdata, process, util, threading
+import data, parserdata, process, util, threading, uuid
 
 # TODO: If this ever goes from relocatable package to system-installed, this may need to be
 # a configured-in path.
@@ -74,15 +74,14 @@ _log = logging.getLogger('pymake.execution')
 
 class Tracer(data.MakefileCallback):
     '''MakefileCallback that writes to a trace log'''
-    def __init__(self, path):
+    def __init__(self, path, record_variables=False):
         self.path = path
+        self.record_variables = record_variables
         self.rootpid = os.getpid()
         self.f = None
         self.lock = threading.Lock()
 
     def _open(self):
-        if os.getpid() != self.rootpid:
-            print 'PID CHANGED!!!!'
         if os.getpid() != self.rootpid or not self.f:
             self.f = open(self.path, 'a')
 
@@ -107,75 +106,110 @@ class Tracer(data.MakefileCallback):
         self.f.flush()
         self.lock.release()
 
+    def close(self):
+        if self.f:
+            del(self.f)
+            self.f = None
+
+    def onbegin(self, context):
+        data = {
+            'id':      str(context.id),
+            'dir':     context.workdir,
+            'targets': context.targets,
+        }
+        self._write('PYMAKE_BEGIN', data)
+
+    def onfinish(self, context):
+        data = {
+            'id': str(context.id),
+        }
+        self._write('PYMAKE_FINISH', data)
+
     def onmakefilefinishparsing(self, makefile):
-        data = makefile.todict()
-        print data
-        self._write('MAKEFILE_FINISH_PARSING', makefile.todict())
+        #data = makefile.todict()
+        #print data
+        data = {
+            'id':         str(makefile.id),
+            'context_id': str(makefile.context_id),
+        }
+        self._write('MAKEFILE_FINISH_PARSING', data)
 
     def onmakebegin(self, makefile, targets):
-        variables = {}
-        for (k, flavor, source, value) in makefile.variables:
-            variables[k] = [flavor, source, unicode(value, errors='replace') ]
-
         data = {
-            'dir': makefile.workdir,
-            'variables': variables,
+            'id':       str(makefile.id),
+            'dir':      makefile.workdir,
             'included': makefile.included,
         }
+
+        if self.record_variables:
+            variables = {}
+            for (k, flavor, source, value) in makefile.variables:
+                variables[k] = [flavor, source, unicode(value, errors='replace') ]
+
+            data['variables'] = variables
 
         self._write('MAKEFILE_BEGIN', data)
 
     def onmakefinish(self, makefile):
         data = {
-            'dir': makefile.workdir,
+            'id':  str(makefile.id),
         }
         self._write('MAKEFILE_FINISH', data)
 
     def ontargetmakebegin(self, makefile, target, targetstack):
-        variables = {}
-        for (k, flavor, source, value) in target.variables:
-            variables[k] = [ flavor, source, unicode(value, errors='replace') ]
-
         data = {
-            'dir': makefile.workdir,
-            'target': target.target,
-            'vpath': target.vpathtarget,
-            'variables': variables,
+            'id':          str(target.id),
+            'makefile_id': str(makefile.id),
+            'dir':         makefile.workdir,
+            'target':      target.target,
+            'vpath':       target.vpathtarget,
         }
+
+        if self.record_variables:
+            variables = {}
+            for (k, flavor, source, value) in target.variables:
+                variables[k] = [ flavor, source, unicode(value, errors='replace') ]
+
+            data['variables'] = variables
+
         self._write('TARGET_BEGIN', data)
 
     def ontargetfinish(self, makefile, target):
         data = {
-            'dir': makefile.workdir,
+            'id':     str(target.id),
+            'dir':    makefile.workdir,
             'target': target.target,
-            'vpath': target.vpathtarget,
+            'vpath':  target.vpathtarget,
         }
         self._write('TARGET_FINISH', data)
 
     def ontargetprocessrules(self, makefile, target, indent, rules):
         data = {
-            'dir': makefile.workdir,
+            'id':     str(target.id),
+            'dir':    makefile.workdir,
             'target': target.target,
             'indent': indent,
         }
         self._write('TARGET_PROCESS_RULES', data)
 
     def onrulecontextprocesscommands(self, context, indent):
-        data = {
-            'dir': context.makefile.workdir,
-            'target': context.target.target,
-            'rule': str(context.rule),
-        }
-        self._write('RULE_CONTEXT_PROCESS_COMMANDS', data)
+        pass
+        #data = {
+        #    'dir':    context.makefile.workdir,
+        #    'target': context.target.target,
+        #    'rule':   str(context.rule),
+        #}
+        #self._write('RULE_CONTEXT_PROCESS_COMMANDS', data)
 
     def oncommandcreate(self, makefile, target, prerequisites, command):
         data = {
-            'id': str(command.id),
-            'dir': makefile.workdir,
-            'target': target.target,
-            'vpath': target.vpathtarget,
-            'l': str(command.loc),
-            'cmd': command.cline
+            'id':        str(command.id),
+            'target_id': str(target.id),
+            'dir':       makefile.workdir,
+            'target':    target.target,
+            'vpath':     target.vpathtarget,
+            'l':         str(command.loc),
+            'cmd':       command.cline
         }
 
         self._write('COMMAND_CREATE', data)
@@ -187,18 +221,22 @@ class Tracer(data.MakefileCallback):
         }
 
         if type == 'popen':
-            data['argv'] = job.argv
+            data['argv']       = job.argv
             data['executable'] = job.executable
             data['shell']      = job.shell
-            #data['env']        = job.env
             data['cwd']        = job.cwd
+        elif type == 'python':
+            data['module']        = job.module
+            data['method']        = job.method
+            data['argv']          = job.argv
+            data['cwd']           = job.cwd
+            data['pycommandpath'] = job.pycommandpath
 
         self._write('JOB_START', data)
 
     def onjobfinish(self, type, job, result):
         data = {
             'id':     str(job.id),
-            'type':   type,
             'result': result,
         }
 
@@ -218,11 +256,13 @@ class _MakeContext(object):
         self.overrides = overrides
         self.cb = cb
 
+        self.id = uuid.uuid1()
         self.restarts = 0
 
         self.callback = None
         if options.tracelog:
-            self.callback = Tracer(options.tracelog)
+            self.callback = Tracer(options.tracelog, options.tracevars)
+            self.callback.onbegin(self)
 
         self.remakecb(True)
 
@@ -248,7 +288,8 @@ class _MakeContext(object):
                                           keepgoing=self.options.keepgoing,
                                           silent=self.options.silent,
                                           justprint=self.options.justprint,
-                                          callback=self.callback)
+                                          callback=self.callback,
+                                          context_id=self.id)
 
             self.restarts += 1
 
@@ -293,6 +334,8 @@ class _MakeContext(object):
 
             if self.callback:
                 self.callback.onmakefinish(self.makefile)
+                self.callback.onfinish(self)
+                self.callback.close()
 
             self.context.defer(self.cb, 0)
         else:
@@ -340,6 +383,11 @@ def main(args, env, cwd, cb):
                       dest='tracelog',
                       default=None,
                       help='Path to write trace log to')
+        op.add_option('--trace-variables',
+                      dest='tracevars',
+                      default=False,
+                      action='store_true',
+                      help='Whether to record variables in trace log')
 
         options, arguments1 = op.parse_args(parsemakeflags(env))
         options, arguments2 = op.parse_args(args, values=options)

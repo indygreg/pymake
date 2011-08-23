@@ -776,6 +776,7 @@ class Target(object):
 
     def __init__(self, target, makefile):
         assert isinstance(target, str)
+        self.id = uuid.uuid1()
         self.target = target
         self.vpathtarget = None
         self.rules = []
@@ -786,6 +787,7 @@ class Target(object):
 
     def todict(self):
         return {
+            'id':          self.id,
             'name':        self.target,
             'vpathtarget': self.vpathtarget,
             'variables':   self.variables.todict(self.makefile)
@@ -1535,7 +1537,7 @@ class Makefile(object):
     def __init__(self, workdir=None, env=None, restarts=0, make=None,
                  makeflags='', makeoverrides='',
                  makelevel=0, context=None, targets=(), keepgoing=False,
-                 silent=False, justprint=False, callback=None):
+                 silent=False, justprint=False, callback=None, context_id=None):
         '''Create a new Makefile.
 
         Keyword arguments:
@@ -1546,6 +1548,9 @@ class Makefile(object):
                     during Makefile execution
         '''
         self.defaulttarget = None
+
+        self.id = uuid.uuid1()
+        self.context_id = context_id
 
         if env is None:
             env = os.environ
@@ -1622,6 +1627,7 @@ class Makefile(object):
 
     def todict(self):
         ret = {
+            'id':           self.id,
             #'env':          self.env,
             'exportedvars': self.exportedvars,
             'workdir':      self.workdir,
