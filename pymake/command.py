@@ -106,11 +106,6 @@ class Tracer(data.MakefileCallback):
         self.f.flush()
         self.lock.release()
 
-    def close(self):
-        if self.f:
-            del(self.f)
-            self.f = None
-
     def onbegin(self, context):
         data = {
             'id':      str(context.id),
@@ -335,7 +330,6 @@ class _MakeContext(object):
             if self.callback:
                 self.callback.onmakefinish(self.makefile)
                 self.callback.onfinish(self)
-                self.callback.close()
 
             self.context.defer(self.cb, 0)
         else:

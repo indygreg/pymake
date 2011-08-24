@@ -2,7 +2,7 @@
 A representation of makefile data structures.
 """
 
-import logging, re, os, sys, uuid
+import logging, re, os, sys, copy, uuid
 import parserdata, parser, functions, process, util, implicit
 from cStringIO import StringIO
 
@@ -777,20 +777,25 @@ class Target(object):
     def __init__(self, target, makefile):
         assert isinstance(target, str)
         self.id = uuid.uuid1()
+        self.makefile_id = copy.deepcopy(makefile.id)
         self.target = target
         self.vpathtarget = None
         self.rules = []
         self.variables = Variables(makefile.variables)
         self.explicit = False
         self._state = MAKESTATE_NONE
-        self.makefile = makefile
 
-    def todict(self):
+        # If we store makefile in the instance, there is a reference somewhere
+        # that causes things to never be garbage collected and the process
+        # keeps growing. This is why todict() requires an argument.
+
+    def todict(self, makefile):
         return {
-            'id':          self.id,
+            'id':          str(self.id),
+            'makefile_id': str(self.makefile_id),
             'name':        self.target,
             'vpathtarget': self.vpathtarget,
-            'variables':   self.variables.todict(self.makefile)
+            'variables':   self.variables.todict(makefile)
         }
 
     def addrule(self, rule):
@@ -1550,7 +1555,7 @@ class Makefile(object):
         self.defaulttarget = None
 
         self.id = uuid.uuid1()
-        self.context_id = context_id
+        self.context_id = copy.deepcopy(context_id)
 
         if env is None:
             env = os.environ
