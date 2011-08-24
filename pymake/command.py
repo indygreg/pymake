@@ -8,7 +8,7 @@ except when a submake specifies -j1 when the parent make is building in parallel
 
 import os, os.path, subprocess, sys, logging, time, traceback, re, errno, json
 from optparse import OptionParser
-import data, parserdata, process, util, threading, uuid
+import data, parserdata, process, util, threading, uuid, gc
 
 # TODO: If this ever goes from relocatable package to system-installed, this may need to be
 # a configured-in path.
@@ -330,6 +330,14 @@ class _MakeContext(object):
             if self.callback:
                 self.callback.onmakefinish(self.makefile)
                 self.callback.onfinish(self)
+
+                self.callback = None
+
+                # For whatever reason, the CPython GC doesn't do a good job of
+                # collecting and we end up with a memory leak unless we invoke
+                # a manual collection. This only seems to happen on the parent
+                # process, interestingly.
+                gc.collect(0)
 
             self.context.defer(self.cb, 0)
         else:
