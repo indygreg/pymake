@@ -74,9 +74,8 @@ _log = logging.getLogger('pymake.execution')
 
 class Tracer(data.MakefileCallback):
     '''MakefileCallback that writes to a trace log'''
-    def __init__(self, path, record_variables=False):
+    def __init__(self, path):
         self.path = path
-        self.record_variables = record_variables
         self.rootpid = os.getpid()
         self.f = None
         self.lock = threading.Lock()
@@ -121,8 +120,6 @@ class Tracer(data.MakefileCallback):
         self._write('PYMAKE_FINISH', data)
 
     def onmakefilefinishparsing(self, makefile):
-        #data = makefile.todict()
-        #print data
         data = {
             'id':         str(makefile.id),
             'context_id': str(makefile.context_id),
@@ -135,13 +132,6 @@ class Tracer(data.MakefileCallback):
             'dir':      makefile.workdir,
             'included': makefile.included,
         }
-
-        if self.record_variables:
-            variables = {}
-            for (k, flavor, source, value) in makefile.variables:
-                variables[k] = [flavor, source, unicode(value, errors='replace') ]
-
-            data['variables'] = variables
 
         self._write('MAKEFILE_BEGIN', data)
 
@@ -159,13 +149,6 @@ class Tracer(data.MakefileCallback):
             'target':      target.target,
             'vpath':       target.vpathtarget,
         }
-
-        if self.record_variables:
-            variables = {}
-            for (k, flavor, source, value) in target.variables:
-                variables[k] = [ flavor, source, unicode(value, errors='replace') ]
-
-            data['variables'] = variables
 
         self._write('TARGET_BEGIN', data)
 
@@ -256,7 +239,7 @@ class _MakeContext(object):
 
         self.callback = None
         if options.tracelog:
-            self.callback = Tracer(options.tracelog, options.tracevars)
+            self.callback = Tracer(options.tracelog)
             self.callback.onbegin(self)
 
         self.remakecb(True)
@@ -385,11 +368,6 @@ def main(args, env, cwd, cb):
                       dest='tracelog',
                       default=None,
                       help='Path to write trace log to')
-        op.add_option('--trace-variables',
-                      dest='tracevars',
-                      default=False,
-                      action='store_true',
-                      help='Whether to record variables in trace log')
 
         options, arguments1 = op.parse_args(parsemakeflags(env))
         options, arguments2 = op.parse_args(args, values=options)
