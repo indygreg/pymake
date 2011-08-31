@@ -47,24 +47,25 @@ class TraceParser(object):
 
         targets = {}
 
-        def callback(action, time, data, context):
-            if action != 'TARGET_BEGIN':
-                return
+        for m in self.get_pymake_instances():
+            for makefile_id, makefile in m['makefiles'].iteritems():
+                dir = makefile['dir']
 
-            name = data['target']
-            dir = data['dir']
+                for target_id, target in makefile['targets'].iteritems():
+                    name = target['name']
 
-            fullname = os.path.normpath(os.path.join(dir, name))
+                    fullname = None
 
-            if fullname.find(self.root_dir) == 0:
-                fullname = fullname[len(self.root_dir):]
+                    if len(name) > 0 and name[0] == os.sep:
+                        fullname = name
+                    else:
+                        fullname = os.path.normpath(os.path.join(dir, name))
 
-            if fullname in targets:
-                targets[fullname] += 1
-            else:
-                targets[fullname] = 1
+                    if fullname in targets:
+                        targets[fullname] += 1
+                    else:
+                        targets[fullname] = 1
 
-        self.parse_file(callback)
         return targets
 
     def get_jobs(self):
@@ -162,6 +163,8 @@ class TraceParser(object):
             'makefiles':    {}, # makefile id to dictionary
             'target_map':   {}, # target id to makefile id
             'targets':      {}, # target id to dictionary
+            'command_map':  {}, # command id to target id
+            'commands':     {}, # command id to dictionary
         }
 
         def callback(action, time, data, context):
@@ -215,12 +218,23 @@ class TraceParser(object):
                     entry['makefiles'][make_id]['targets'][target_id] = context['targets'][target_id]
                     del context['targets'][target_id]
 
+                commands = {}
+                for command_id, target_id in context['command_map'].iteritems():
+                    if target_id in targets.keys():
+                        commands[command_id] = target_id
+
+                for command_id, target_id in commands.iteritems():
+                    del context['command_map'][command_id]
+
+                    entry['makefiles'][targets[target_id]]['targets'][target_id]['commands'][command_id] = context['commands'][command_id]
+                    del context['commands'][command_id]
+
                 context['results'].append(entry)
 
-            elif action == 'MAKEFILE_FINISH_PARSING':
+            elif action == 'MAKEFILE_CREATE':
                 entry = {
-                    'parse_finish_time': time,
-                    'targets':           {}
+                    'targets': {},
+                    'dir':     data['dir'],
                 }
 
                 id = data['id']
@@ -253,8 +267,8 @@ class TraceParser(object):
                 context['targets'][id] = {
                     'time_start': time,
                     'name':       data['target'],
-                    'dir':        data['dir'],
-                    'vpath':      data['vpath']
+                    'vpath':      data['vpath'],
+                    'commands':   {},
                 }
 
             elif action == 'TARGET_FINISH':
@@ -265,6 +279,50 @@ class TraceParser(object):
                 entry = context['targets'][id]
                 entry['time_finish'] = time
 
+            elif action == 'COMMAND_CREATE':
+                id = data['id']
+                target_id = data['target_id']
+
+                context['command_map'][id] = target_id
+                context['commands'][id] = {
+                    'time_create': time,
+                    'cmd':         data['cmd'],
+                    'l':           data['l'],
+                }
+
+            elif action == 'JOB_START':
+                id = data['id']
+                if id not in context['commands']:
+                    return
+
+                entry = context['commands'][id]
+
+                type = data['type']
+                entry['type'] = type
+                entry['time_start'] = time
+
+                if type == 'popen':
+                    entry['executable'] = data['executable']
+                    entry['argv']       = data['argv']
+                    entry['shell']      = data['shell']
+                elif type == 'python':
+                    entry['module'] = data['module']
+                    entry['method'] = data['method']
+                    entry['argv']   = data['argv']
+                else:
+                    raise Exception('unhandled job type: %s' % type)
+
+            elif action == 'JOB_FINISH':
+                id = data['id']
+                if id not in context['commands']:
+                    return
+
+                entry = context['commands'][id]
+                entry['result'] = data['result']
+                entry['time_end'] = time
+                entry['wall_time'] = time - entry['time_start']
+
+
         self.parse_file(callback, ctx)
 
         return ctx['results']
@@ -272,113 +330,55 @@ class TraceParser(object):
     def get_executed_commands(self):
         '''Obtains a list of commands that were invoked during make process'''
 
-        commands = []
-
-        def callback(action, time, data, context):
-            if action != 'COMMAND_CREATE':
-                return
-
-            if not len(data['cmd']):
-                return
-
-            commands.append((data['dir'], data['target'], data['cmd']))
-
-        self.parse_file(callback)
-
-        return commands
-
-    def get_executed_commands_report(self):
-        '''Obtains a report of the executed commands.
-
-        The report classifies related commands, performs counts, etc. This is
-        useful for seeing where hot spots in the build process are, etc.
-        '''
-
-        command_counts = {}
-
-        for command in self.get_executed_commands():
-            params = command[2].split()
-
-            if not len(params):
-                continue
-
-            orig = params[0]
-            base = os.path.basename(orig)
-
-            # Many commands are wrapped by the main python executable. We
-            # drill into them.
-            # TODO this should probably be a positive filter instead of a
-            # negative one
-            if base.find('python') != -1 and base != 'pythonpath':
-                if len(params) < 2:
-                    if base in command_counts:
-                        command_counts[base] += 1
-                    else:
-                        command_counts[base] = 1
-
-                    continue
-
-                real = params[1]
-
-                if not os.path.isabs(real):
-                    real = os.path.join(command[0], real)
-
-                real = os.path.normpath(real)
-
-                if real in command_counts:
-                    command_counts[real] += 1
-                else:
-                    command_counts[real] = 1
-            else:
-                if orig in command_counts:
-                    command_counts[orig] += 1
-                else:
-                    command_counts[orig] = 1
-
-        return {
-            'counts': command_counts
-        }
-
-    def print_execution_tree(self, f):
-        context = {
-            'current_dir': self.root_dir,
-            'level': 0
+        commands = {
+            'c': {},
+            'l': []
         }
 
         def callback(action, time, data, context):
-            if action == 'MAKEFILE_BEGIN':
-                dir = data['dir']
-                assert dir.find(self.root_dir) == 0
-
-                context['current_dir'] = dir[len(self.root_dir):]
-                print >> f, '%sNEW MAKEFILE: %s' % ( ' ' * context['level'], context['current_dir'] )
-                context['level'] += 1
-
-            elif action == 'MAKEFILE_FINISH':
-                context['level'] -= 1
-                print >> f, '%sEND MAKEFILE' % ( ' ' * context['level'] )
-
-            elif action == 'TARGET_BEGIN':
-                name = data['target']
-
-                print >> f, '%sBEGIN TARGET: %s' % ( ' ' * context['level'], name )
-                context['level'] += 1
-
-            elif action == 'TARGET_FINISH':
-                name = data['target']
-
-                context['level'] -= 1
-                print >> f, '%sEND TARGET %s' % ( ' ' * context['level'], name )
-
-            elif action == 'COMMAND_CREATE':
-                command = data['cmd']
-
-                print >> f, '%s$ %s' % ( ' ' * context['level'], command )
+            if action == 'COMMAND_CREATE':
+                id = data['id']
+                context['c'][id] = {
+                    'target': data['target_id'],
+                    'l':      data['l'],
+                    'cmd':    data['cmd'],
+                }
 
             elif action == 'JOB_START':
-                pass
+                id = data['id']
+                if id not in context['c']:
+                    return
+
+                entry = context['c'][id]
+                type = data['type']
+                entry['type'] = type
+                entry['time_start'] = time
+
+                if type == 'popen':
+                    entry['executable'] = data['executable']
+                    entry['argv']       = data['argv']
+                    entry['shell']      = data['shell']
+                elif type == 'python':
+                    entry['module'] = data['module']
+                    entry['method'] = data['method']
+                    entry['argv']   = data['argv']
+                else:
+                    raise Exception('unhandled job type: %s' % type )
 
             elif action == 'JOB_FINISH':
-                pass
+                id = data['id']
+                if id not in context['c']:
+                    return
 
-        self.parse_file(callback, context)
+                entry = context['c'][id]
+
+                entry['time_end'] = time
+                entry['wall_time'] = time - entry['time_start']
+                entry['result'] = data['result']
+
+                context['l'].append(entry)
+                del context['c'][id]
+
+        self.parse_file(callback, commands)
+
+        return commands['l']

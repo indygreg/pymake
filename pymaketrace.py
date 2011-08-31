@@ -21,16 +21,6 @@ def main(argv):
                   default=False,
                   action='store_true',
                   help='Print a raw list of commands that were executed')
-    op.add_option('--print-command-counts',
-                  dest='print_command_counts',
-                  default=False,
-                  action='store_true',
-                  help='Print counts of how often individual commands were executed')
-    op.add_option('--print-execution-tree',
-                  dest='print_execution_tree',
-                  default=False,
-                  action='store_true',
-                  help='Print a tree showing the execution order')
     op.add_option('--print-job-times',
                   dest='print_job_times',
                   default=False,
@@ -45,7 +35,7 @@ def main(argv):
                   dest='print_make_times',
                   default=False,
                   action='store_true',
-                  help='Prints execution times of all spawned PyMake instances')
+                  help='Prints execution times of all spawned PyMake instances.')
 
     options, args = op.parse_args()
 
@@ -64,15 +54,7 @@ def main(argv):
         if options.print_command_list:
             commands = parser.get_executed_commands()
             for c in commands:
-                print c[2]
-
-        if options.print_command_counts:
-            data = parser.get_executed_commands_report()
-            for k, v in data['counts'].iteritems():
-                print '%d\t%s' % ( v, k )
-
-        if options.print_execution_tree:
-            parser.print_execution_tree(sys.stdout)
+                print c['cmd']
 
         if options.print_job_times:
             for j in parser.get_jobs():
