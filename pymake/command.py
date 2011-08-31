@@ -155,9 +155,6 @@ class Tracer(data.MakefileCallback):
     def ontargetfinish(self, makefile, target):
         data = {
             'id':     str(target.id),
-            'dir':    makefile.workdir,
-            'target': target.target,
-            'vpath':  target.vpathtarget,
         }
         self._write('TARGET_FINISH', data)
 
