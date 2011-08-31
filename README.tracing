@@ -1,5 +1,24 @@
-When invoked with the --trace-log argument, PyMake will write a log file
-detailing how it executed.
+PyMake has an API that allows interested parties to subscribe to event
+notifications that are happening during the course of PyMake execution. We
+call this the PyMake Tracing API.
+
+=====
+Usage
+=====
+
+The Tracing API is enabled by passing an instance of the
+pymake.data.MakefileCallback class to the Makefile constructor as the
+"callback" parameter. When this is done, the object instance will have
+various named methods called at specific phases of PyMake execution.
+
+=======
+Logging
+=======
+
+PyMake ships with an implementation of MakefileCallback that performs logging
+to a JSON file. To utilize it, add the "--trace-log=FILE" argument when
+executing make.py. PyMake will write tracing information to the specified
+file.
 
 The produced log file contains JSON arrays separated by the newline character
 for the execution platform.
