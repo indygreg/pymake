@@ -16,9 +16,8 @@ Logging
 =======
 
 PyMake ships with an implementation of MakefileCallback that performs logging
-to a JSON file. To utilize it, add the "--trace-log=FILE" argument when
-executing make.py. PyMake will write tracing information to the specified
-file.
+to a a file. To utilize it, add the "--trace-log=FILE" argument when
+executing make.py.
 
 The produced log file contains JSON arrays separated by the newline character
 for the execution platform.
