@@ -107,9 +107,10 @@ class Tracer(data.MakefileCallback):
 
     def onbegin(self, context):
         data = {
-            'id':      str(context.id),
-            'dir':     context.workdir,
-            'targets': context.targets,
+            'id':        str(context.id),
+            'dir':       context.workdir,
+            'targets':   context.targets,
+            'makefiles': context.options.makefiles,
         }
         self._write('PYMAKE_BEGIN', data)
 
