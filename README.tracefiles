@@ -1,0 +1,196 @@
+When invoked with the --trace-log argument, PyMake will write a log file
+detailing how it executed.
+
+The produced log file contains JSON arrays separated by the newline character
+for the execution platform.
+
+Each line/array contains the following elements:
+
+* Event name
+* Time of event (floating point seconds since UNIX epoch)
+* JSON object with event metadata
+
+The event name and the set of keys in the objects are well-defined.
+
+All event metadata objects contain an 'id' key which contains a version 1
+UUID uniquely identifying the instance of the object being described. When
+child objects are created, they include a 2nd UUID that maps back to the
+parent's id. In other words, a path should exist between any two UUIDs in the
+trace log.
+
+The pymake.traceparser module (included with PyMake) can be used for parsing
+these trace files. Although, parsing using any language should be possible
+given the JSON format.
+
+===========
+Event Types
+===========
+
+PYMAKE_BEGIN
+============
+
+This event is produced when PyMake (make.py) is invoked. It writes the
+following keys:
+
+* id - UUID string uniquely identifying this make.py instance
+* dir - the current working directory
+* makefiles - an array of strings constituting the paths (-f args) that make.py
+              is operating on
+* targets - an array of strings representing the named targets make.py was told
+            to operate on
+
+PYMAKE_FINISH
+=============
+
+This event is produced when a PyMake instance (make.py) finishes execution and
+is likely about to exit or be destroyed. This event should follow a
+PYMAKE_BEGIN having the same id.
+
+It writes the following keys:
+
+* id - UUID string identifying this make.py instance
+
+MAKEFILE_CREATE
+===============
+
+This event is produced when a new Makefile is constructed. The event is called
+in the Makefile constructor before parsing starts and execution begins. It
+writes the following keys:
+
+* id - UUID string identifying this makefile instance
+* context_id - the UUID string of the PyMake context this makefile is
+               associated with. A PYMAKE_BEGIN event having this id should have
+               been written previously in time
+* dir - the working directory for the makefile
+
+MAKEFILE_FINISH_PARSING
+=======================
+
+This event is produced duing makefile execution when PyMake has finished
+parsing the makefile and all included makefiles and is ready for execution.
+
+It writes the following keys:
+
+* id - UUID string of the makefile instance
+
+MAKEFILE_REMAKE
+===============
+
+This event is produced when a makefile starts evaluating/executing. It writes
+the following keys:
+
+* id - UUID string identifying the makefile instance
+* included - array of arrays of included files. For each array element, the
+             first element is the path of the file that was included and the
+             second element is a boolean indicating whether the file is
+             required. The order of elements in the outer array is the order
+             in which they were added. The primary file will be the first
+             element.
+
+MAKEFILE_FINISH
+===============
+
+This event is produced when a makefile has finished execution. It could be
+finished because it has finished making all requested targets or because of
+an error. It writes the following keys:
+
+* id - UUID string identifying the makefile instance
+
+TARGET_BEGIN
+============
+
+This event is produced when a target in a makefile begins execution. It writes
+the following keys:
+
+* id - UUID string identifying this target instance. UUIDs for targets are
+       generated for each makefile they belong to. So, if the same target is
+       executed by multiple makefiles, it will have a different UUID. Other
+       metadata can be used to combine similar targets.
+* makefile_id - UUID string of the makefile instance this target belongs to.
+* target - the string name of the target
+* vpath - the string vpath of the target (often the same as the target, but
+          not always.
+
+TARGET_PROCESS_RULES
+====================
+
+This event is produced right before a target begins processing of its rules.
+In the time between TARGET_BEGIN and TARGET_PROCESS_RULES, the target is being
+evaluated for dependencies, execution order, etc. If a target has nothing to
+do, this event won't be emitted.
+
+This event writes the following keys:
+
+* id - UUID of target instance
+
+TARGET_FINISH
+=============
+
+This event is produced when a target has finished execution. It writes the
+following keys:
+
+* id - UUID string of the target instance
+
+COMMAND_CREATE
+==============
+
+This event is produced when a command has been created. Commands are the
+things that actually perform the execution in recipes.
+
+Unless you are running in a non-standard PyMake execution context, this event
+should be thought of as scheduling a command for execution.
+
+When commands are actually executed, they are referred to as jobs. See the
+events below for more.
+
+This event writes the following keys:
+
+* id - UUID for this command instance. If a command is executed multiple times
+       it will have different UUIDs because each instance of a command is
+       different.
+* target_id - UUID of the target this command is being executed for.
+* l - The location in a makefile where this command was defined.
+* cmd - The command that will be executed. This can be used for presentation
+        purposes. For deeper analysis, it is recommended to look at the rich
+        structure exposed by the various JOB_* events.
+
+JOB_START
+=========
+
+This event is produced just before a command begins execution. It is referred
+to as a "job" rather than "command" because that's how the PyMake
+implementation refers to them. You can think of them as equivalent.
+
+This event always has the following keys:
+
+* id - UUID of the command being executed
+* type - the type of command being executed. Either 'popen' or 'python'
+
+If 'type' is 'popen' the job is one that will be executed on a new process.
+'popen' jobs have the following additional keys:
+
+* executable - The string path of the executable about to run. This may be
+               null.
+* argv - The arguments to the program about to be executed. This can be a
+         string or array of strings, depending on how the command was defined.
+* shell - Boolean indicating whether to execute in a shell.
+
+The keys for the 'popen' job match to the arguments for Python's
+subprocess.Popen() method.
+
+If 'type' is 'python' the job will be executed as a Python method call and the
+event will have the following additional keys:
+
+* module - The Python module containing the method to be called
+* method - The string name of the method about to be called
+* argv - String to be passed as first parameter to method
+* pycommandpath - ???
+
+JOB_FINISH
+==========
+
+This event is produced immediately after a job/command finishes execution. It
+writes the following keys:
+
+* id - UUID of command/job
+* result - integer result/exit code of process. 0 means success.

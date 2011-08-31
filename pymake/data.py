@@ -1455,22 +1455,26 @@ class MakefileCallback(object):
     to a central data structure.
     '''
 
+    def onmakefilecreate(self, makefile):
+        '''Handler called when makefile is created'''
+        raise Exception('onmakefilecreate() not implemented')
+
     def onmakefilefinishparsing(self, makefile):
         '''Handler called when makefile has finished parsing'''
         raise Exception('onmakefilefinishparsing() not implemented')
 
-    def onmakebegin(self, makefile, targetlist):
+    def onmakefileremake(self, makefile, targetlist):
         '''Handler called when makefile is remake'd
 
         Receives the Makefile instance and the list of targets being made.
         '''
-        raise Exception('onremakebegin() not implemented')
+        raise Exception('onremakefileremake() not implemented')
 
-    def onmakefinish(self, makefile):
+    def onmakefilefinish(self, makefile):
         '''Handler called when makefile is done making
 
         Receives the Makefile instance that just finished'''
-        raise Exception('onmakedone() not implemented')
+        raise Exception('onmakefilefinish() not implemented')
 
     def ontargetmakebegin(self, makefile, target, stacklist):
         '''Handler called when target in Makefile calls make()
@@ -1630,6 +1634,9 @@ class Makefile(object):
                                Variables.FLAVOR_SIMPLE,
                                Variables.SOURCE_IMPLICIT, val)
 
+        if self.callback:
+            self.callback.onmakefilecreate(self)
+
     def todict(self):
         ret = {
             'id':           self.id,
@@ -1780,7 +1787,7 @@ class Makefile(object):
             mlist.append((t, oldmtime))
 
         if self.callback:
-            self.callback.onmakebegin(self, mlist)
+            self.callback.onmakefileremake(self, mlist)
 
         _RemakeContext(self, cb)
 

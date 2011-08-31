@@ -120,23 +120,29 @@ class Tracer(data.MakefileCallback):
         }
         self._write('PYMAKE_FINISH', data)
 
-    def onmakefilefinishparsing(self, makefile):
+    def onmakefilecreate(self, makefile):
         data = {
             'id':         str(makefile.id),
             'context_id': str(makefile.context_id),
+            'dir':        makefile.workdir,
+        }
+        self._write('MAKEFILE_CREATE', data)
+
+    def onmakefilefinishparsing(self, makefile):
+        data = {
+            'id':         str(makefile.id),
         }
         self._write('MAKEFILE_FINISH_PARSING', data)
 
-    def onmakebegin(self, makefile, targets):
+    def onmakefileremake(self, makefile, targets):
         data = {
             'id':       str(makefile.id),
-            'dir':      makefile.workdir,
             'included': makefile.included,
         }
 
-        self._write('MAKEFILE_BEGIN', data)
+        self._write('MAKEFILE_REMAKE', data)
 
-    def onmakefinish(self, makefile):
+    def onmakefilefinish(self, makefile):
         data = {
             'id':  str(makefile.id),
         }
@@ -146,7 +152,6 @@ class Tracer(data.MakefileCallback):
         data = {
             'id':          str(target.id),
             'makefile_id': str(makefile.id),
-            'dir':         makefile.workdir,
             'target':      target.target,
             'vpath':       target.vpathtarget,
         }
@@ -162,9 +167,6 @@ class Tracer(data.MakefileCallback):
     def ontargetprocessrules(self, makefile, target, indent, rules):
         data = {
             'id':     str(target.id),
-            'dir':    makefile.workdir,
-            'target': target.target,
-            'indent': indent,
         }
         self._write('TARGET_PROCESS_RULES', data)
 
@@ -181,9 +183,6 @@ class Tracer(data.MakefileCallback):
         data = {
             'id':        str(command.id),
             'target_id': str(target.id),
-            'dir':       makefile.workdir,
-            'target':    target.target,
-            'vpath':     target.vpathtarget,
             'l':         str(command.loc),
             'cmd':       command.cline
         }
@@ -309,7 +308,7 @@ class _MakeContext(object):
             sys.stdout.flush()
 
             if self.callback:
-                self.callback.onmakefinish(self.makefile)
+                self.callback.onmakefilefinish(self.makefile)
                 self.callback.onfinish(self)
 
                 self.callback = None
