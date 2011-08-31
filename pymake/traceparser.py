@@ -152,6 +152,121 @@ class TraceParser(object):
 
         return jobs.values()
 
+    def get_pymake_instances(self):
+        '''Obtains information about individual PyMake instances'''
+
+        ctx = {
+            'results':      [], # consolidated records
+            'pymakes':      {}, # pymake id to dictionary
+            'makefile_map': {}, # makefile id to pymake id
+            'makefiles':    {}, # makefile id to dictionary
+            'target_map':   {}, # target id to makefile id
+            'targets':      {}, # target id to dictionary
+        }
+
+        def callback(action, time, data, context):
+            if action == 'PYMAKE_BEGIN':
+                id = data['id']
+
+                context['pymakes'][id] = {
+                    'id':          id,
+                    'dir':         data['dir'],
+                    'targets':     data['targets'],
+                    'time_start':  time,
+                    'makefiles':   {}
+                }
+
+            elif action == 'PYMAKE_FINISH':
+                id = data['id']
+
+                if id not in context['pymakes']:
+                    return
+
+                entry = context['pymakes'][id]
+                entry['time_finish'] = time
+                entry['wall_time'] = time - entry['time_start']
+
+                del context['pymakes'][id]
+
+                makefile_ids = []
+
+                for make_id, pymake_id in context['makefile_map'].iteritems():
+                    if id != pymake_id:
+                        continue
+
+                    makefile_ids.append(make_id)
+
+                for make_id in makefile_ids:
+                    del context['makefile_map'][make_id]
+
+                    entry['makefiles'][make_id] = context['makefiles'][make_id]
+                    del context['makefiles'][make_id]
+
+                targets = {}
+
+                for target_id, make_id in context['target_map'].iteritems():
+                    if make_id in makefile_ids:
+                        targets[target_id] = make_id
+
+                for target_id, make_id in targets.iteritems():
+                    del context['target_map'][target_id]
+
+                    entry['makefiles'][make_id]['targets'][target_id] = context['targets'][target_id]
+                    del context['targets'][target_id]
+
+                context['results'].append(entry)
+
+            elif action == 'MAKEFILE_FINISH_PARSING':
+                entry = {
+                    'parse_finish_time': time,
+                    'targets':           {}
+                }
+
+                id = data['id']
+                context['makefile_map'][id] = data['context_id']
+                context['makefiles'][id] = entry
+
+            elif action == 'MAKEFILE_BEGIN':
+                id = data['id']
+                if id not in context['makefiles']:
+                    return
+
+                entry = context['makefiles'][id]
+                entry['time_begin'] = time
+                entry['dir']        = data['dir']
+                entry['included']   = data['included']
+
+            elif action == 'MAKEFILE_FINISH':
+                id = data['id']
+                if id not in context['makefiles']:
+                    return
+
+                entry = context['makefiles'][id]
+                entry['time_finish'] = time
+
+            elif action == 'TARGET_BEGIN':
+                id = data['id']
+                make_id = data['makefile_id']
+
+                context['target_map'][id] = make_id
+                context['targets'][id] = {
+                    'time_start': time,
+                    'name':       data['target'],
+                    'dir':        data['dir'],
+                    'vpath':      data['vpath']
+                }
+
+            elif action == 'TARGET_FINISH':
+                id = data['id']
+                if id not in context['targets']:
+                    return
+
+                entry = context['targets'][id]
+                entry['time_finish'] = time
+
+        self.parse_file(callback, ctx)
+
+        return ctx['results']
 
     def get_executed_commands(self):
         '''Obtains a list of commands that were invoked during make process'''

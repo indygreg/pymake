@@ -41,6 +41,11 @@ def main(argv):
                   default=False,
                   action='store_true',
                   help='Like --print-job-times except it sums jobs of the same command')
+    op.add_option('--print-make-times',
+                  dest='print_make_times',
+                  default=False,
+                  action='store_true',
+                  help='Prints execution times of all spawned PyMake instances')
 
     options, args = op.parse_args()
 
@@ -76,6 +81,10 @@ def main(argv):
         if options.print_aggregate_job_times:
             for j in parser.get_aggregate_jobs():
                 print '%f\t%d\t%s' % ( j['wall_time'], j['count'], j['name'] )
+
+        if options.print_make_times:
+            for m in parser.get_pymake_instances():
+                print '%f\t%s\t%s' % ( m['wall_time'], m['dir'], ' '.join(m['targets']) )
 
 if __name__ == '__main__':
     main(sys.argv[1:])
