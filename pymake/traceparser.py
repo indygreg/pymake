@@ -173,6 +173,7 @@ class TraceParser(object):
                     'dir':         data['dir'],
                     'targets':     data['targets'],
                     'time_start':  time,
+                    'files':       data['makefiles'],
                     'makefiles':   {}
                 }
 

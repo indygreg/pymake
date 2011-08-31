@@ -7,7 +7,7 @@ Authored by Gregory Szorc <gregory.szorc@gmail.com>. All rights reserved.
 
 from optparse import OptionParser
 from pymake.traceparser import TraceParser
-import sys
+import os, sys
 
 def main(argv):
     op = OptionParser()
@@ -84,7 +84,9 @@ def main(argv):
 
         if options.print_make_times:
             for m in parser.get_pymake_instances():
-                print '%f\t%s\t%s' % ( m['wall_time'], m['dir'], ' '.join(m['targets']) )
+                print '%f\t%s\t%s%s{%s}\t%s' % ( m['wall_time'], m['id'],
+                    m['dir'], os.sep, ', '.join(m['files']),
+                    ' '.join(m['targets']) )
 
 if __name__ == '__main__':
     main(sys.argv[1:])
