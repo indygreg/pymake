@@ -108,6 +108,7 @@ class Tracer(data.MakefileCallback):
     def onbegin(self, context):
         data = {
             'id':        str(context.id),
+            'parent_id': context.parent_id,
             'dir':       context.workdir,
             'targets':   context.targets,
             'makefiles': context.options.makefiles,
@@ -232,12 +233,15 @@ class _MakeContext(object):
         self.cb = cb
 
         self.id = uuid.uuid1()
+        self.parent_id = env.get('PYMAKE_ID')
         self.restarts = 0
 
         self.callback = None
         if options.tracelog:
             self.callback = Tracer(options.tracelog)
             self.callback.onbegin(self)
+
+        self.env['PYMAKE_ID'] = str(self.id)
 
         self.remakecb(True)
 

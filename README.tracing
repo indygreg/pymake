@@ -62,6 +62,8 @@ This event is produced when PyMake (make.py) is invoked. It writes the
 following keys:
 
 * id - UUID string uniquely identifying this make.py instance
+* parent_id - UUID string identifying the PyMake parent for this instance.
+              This will be null if this is the parent PyMake instance.
 * dir - the current working directory
 * makefiles - an array of strings constituting the paths (-f args) that make.py
               is operating on
