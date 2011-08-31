@@ -6,7 +6,7 @@ Authored by Gregory Szorc <gregory.szorc@gmail.com>. All rights reserved.
 '''
 
 from optparse import OptionParser
-from pymake.traceparser import TraceParser
+from pymake.traceparser import TraceParser, Trace
 import os, sys
 
 def main(argv):
@@ -36,6 +36,11 @@ def main(argv):
                   default=False,
                   action='store_true',
                   help='Prints execution times of all spawned PyMake instances.')
+    op.add_option('--print-bsa',
+                  dest='print_bsa',
+                  default=False,
+                  action='store_true',
+                  help='Print a JSON string to be used by the BSA analyzer tool.')
 
     options, args = op.parse_args()
 
@@ -44,7 +49,12 @@ def main(argv):
         sys.exit(1)
 
     for path in args:
-        parser = TraceParser(path)
+        parser = None
+        trace = None
+        if options.print_bsa:
+            trace = Trace(path)
+        else:
+            parser = TraceParser(path)
 
         if options.print_target_counts:
             targets = parser.get_target_execution_counts()
@@ -69,6 +79,9 @@ def main(argv):
                 print '%f\t%s\t%s%s{%s}\t%s' % ( m['wall_time'], m['id'],
                     m['dir'], os.sep, ', '.join(m['files']),
                     ' '.join(m['targets']) )
+
+        if options.print_bsa:
+            trace.printbsa(sys.stdout)
 
 if __name__ == '__main__':
     main(sys.argv[1:])

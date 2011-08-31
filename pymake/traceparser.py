@@ -3,6 +3,234 @@
 import json
 import os.path
 
+class Trace(object):
+    '''Represents a parsed PyMake trace'''
+    def __init__(self, path):
+        self.pymakes = {}
+        self.root_pymake = None
+        self.makefiles = {}
+        self.targets = {}
+        self.commands = {}
+        self.initial_time = None
+        self.timeline = []
+
+        parser = TraceParser(path)
+
+        parser.parse_file(self._parse_callback)
+
+    def _parse_callback(self, action, time, data, context):
+        if action == 'PYMAKE_BEGIN':
+            id = data['id']
+
+            entry = {
+                'id':         id,
+                'dir':        dir,
+                'targets':    [],
+                'time_start': time,
+                'files':      data['makefiles']
+            }
+
+            if data['parent_id']:
+                entry['parent_id'] = data['parent_id']
+            else:
+                self.root_pymake = id
+                self.initial_time = time
+
+            self.pymakes[id] = entry
+            self.timeline.append((time, 'PYMAKE_BEGIN', id))
+
+        elif action == 'PYMAKE_FINISH':
+            id = data['id']
+            if id not in self.pymakes:
+                return
+
+            entry = self.pymakes[id]
+            entry['time_finish'] = time
+            entry['time_wall'] = time - entry['time_start']
+
+            self.timeline.append((time, 'PYMAKE_FINISH', id))
+
+        elif action == 'MAKEFILE_CREATE':
+            id = data['id']
+            parent_id = data['context_id']
+
+            entry = {
+                'id':          id,
+                'time_create': time,
+                'targets':     [],
+                'dir':         data['dir'],
+                'parent_id':   parent_id,
+            }
+
+            self.makefiles[id] = entry
+
+            if parent_id in self.pymakes:
+                self.pymakes[parent_id]['targets'].append(id)
+
+            self.timeline.append((time, 'MAKEFILE_CREATE', id))
+
+        elif action == 'MAKEFILE_BEGIN':
+            id = data['id']
+            if id not in self.makefiles:
+                return
+
+            entry = self.makefiles[id]
+            entry['time_begin'] = time
+            entry['included']   = data['included']
+
+            self.timeline.append((time, 'MAKEFILE_BEGIN', id))
+
+        elif action == 'MAKEFILE_FINISH':
+            id = data['id']
+            if id not in self.makefiles:
+                return
+
+            entry = self.makefiles[id]
+            entry['time_finish'] = time
+            entry['time_wall'] = time - entry['time_create']
+
+            self.timeline.append((time, 'MAKEFILE_FINISH', id))
+
+        elif action == 'TARGET_BEGIN':
+            id = data['id']
+            parent_id = data['makefile_id']
+
+            entry = {
+                'parent_id':  parent_id,
+                'time_start': time,
+                'name':       data['target'],
+                'vpath':      data['vpath'],
+                'commands':   [],
+            }
+
+            self.targets[id] = entry
+
+            if parent_id in self.makefiles:
+                self.makefiles[parent_id]['targets'].append(id)
+
+            self.timeline.append((time, 'TARGET_BEGIN', id))
+
+        elif action == 'TARGET_FINISH':
+            id = data['id']
+            if id not in self.targets:
+                return
+
+            entry = self.targets[id]
+            entry['time_finish'] = time
+            entry['time_wall'] = time - entry['time_start']
+
+            self.timeline.append((time, 'TARGET_FINISH', id))
+
+        elif action == 'COMMAND_CREATE':
+            id = data['id']
+            parent_id = data['target_id']
+
+            entry = {
+                'parent_id':   parent_id,
+                'time_create': time,
+                'cmd':         data['cmd'],
+                'location':    data['l'],
+            }
+
+            self.commands[id] = entry
+
+            if parent_id in self.targets:
+                self.targets[parent_id]['commands'].append(id)
+
+            self.timeline.append((time, 'COMMAND_CREATE', id))
+
+        elif action == 'JOB_START':
+            id = data['id']
+            if id not in self.commands:
+                return
+
+            entry = self.commands[id]
+
+            type = data['type']
+            entry['type'] = type
+            entry['time_start'] = time
+
+            if type == 'popen':
+                entry['executable'] = data['executable']
+                entry['argv']       = data['argv']
+                entry['shell']      = data['shell']
+            elif type == 'python':
+                entry['module'] = data['module']
+                entry['method'] = data['method']
+                entry['argv']   = data['argv']
+            else:
+                raise Exception('unhandled job type: %s' % type)
+
+            self.timeline.append((time, 'JOB_START', id))
+
+        elif action == 'JOB_FINISH':
+            id = data['id']
+            if id not in self.commands:
+                return
+
+            entry = self.commands[id]
+            entry['result'] = data['result']
+            entry['time_end'] = time
+            entry['time_wall'] = time - entry['time_start']
+
+            self.timeline.append((time, 'JOB_FINISH', id))
+
+    def printbsa(self, f):
+        '''Print a BSA JSON blob of the timing info to a file handler.'''
+        result = {
+            'version': 100,
+            'processes': {}
+        }
+
+        initial = True
+        print >>f, '{ "version": 100, "processes": {'
+
+        for item in self.timeline:
+            if item[1] != 'PYMAKE_BEGIN' and item[1] != 'COMMAND_CREATE':
+                continue
+
+            record = {}
+            if item[1] == 'PYMAKE_BEGIN':
+                m = self.pymakes[item[2]]
+                if 'time_finish' not in m:
+                    continue
+
+                record['start'] = int(1000 * (m['time_start'] - self.initial_time))
+                record['end']   = int(1000 * (m['time_finish'] - self.initial_time))
+                record['type']  = 'make'
+                record['syscalls'] = [ { 'cmd': 'make.py -C %s' % m['dir'], 'duration': record['end'] - record['start'] } ]
+            else:
+                c = self.commands[item[2]]
+                if 'time_end' not in c:
+                    continue
+
+                record['start'] = int(1000 * (c['time_start'] - self.initial_time))
+                record['end']   = int(1000 * (c['time_end'] - self.initial_time))
+                record['type']  = 'foo'
+                record['syscalls'] = [ { 'cmd': c['cmd'], 'duration': record['end'] - record['start']} ]
+                target_id = c['parent_id']
+                if target_id in self.targets:
+                    target = self.targets[target_id]
+                    make_id = target['parent_id']
+                    if make_id in self.makefiles:
+                        makefile = self.makefiles[make_id]
+                        record['parent_id'] = makefile['parent_id']
+                    else:
+                        record['parent_id'] = make_id
+                else:
+                    record['parent_id'] = target_id
+
+            if not initial:
+                print >>f, ',\n'
+
+            print >>f, '"%s":' % item[2]
+            json.dump(record, f)
+            initial = False
+
+        print >>f, '} }'
+
+
+
 class TraceParser(object):
     '''Provides routines for analyzing trace files generated by
     running make.py --trace-log'''
