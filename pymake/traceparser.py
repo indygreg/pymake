@@ -23,11 +23,12 @@ class Trace(object):
             id = data['id']
 
             entry = {
-                'id':         id,
-                'dir':        dir,
-                'targets':    [],
-                'time_start': time,
-                'files':      data['makefiles']
+                'id':           id,
+                'dir':          data['dir'],
+                'targets':      [],
+                'target_names': data['targets'],
+                'time_start':   time,
+                'files':        data['makefiles']
             }
 
             if data['parent_id']:
@@ -198,7 +199,7 @@ class Trace(object):
                 record['start'] = int(1000 * (m['time_start'] - self.initial_time))
                 record['end']   = int(1000 * (m['time_finish'] - self.initial_time))
                 record['type']  = 'make'
-                record['syscalls'] = [ { 'cmd': 'make.py -C %s' % m['dir'], 'duration': record['end'] - record['start'] } ]
+                record['syscalls'] = [ { 'cmd': 'make.py -C %s %s' % ( m['dir'], ' '.join(m['target_names']) ), 'duration': record['end'] - record['start'] } ]
             else:
                 c = self.commands[item[2]]
                 if 'time_end' not in c:
